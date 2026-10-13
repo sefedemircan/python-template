@@ -267,12 +267,14 @@ def _devamsizlik_hours(row: pd.Series) -> float:
 
 
 def _weekdays_trigger_sunday_cut(weekday_slice: pd.DataFrame) -> bool:
-    """Hafta içi satırlarda mazeretsiz tam gün devamsızlık var mı?"""
+    """Hafta içi satırlarda pazar kesintisi tetikleyici var mı? (M veya Z)"""
     if weekday_slice.empty:
         return False
     unprotected = weekday_slice.apply(_devamsizlik_hours, axis=1) >= FULL_DAY_HOURS - 0.01
     protected = weekday_slice["Durum"].isin(SUNDAY_PROTECTING_STATUSES)
-    return bool((unprotected & ~protected).any())
+    absence_cut = bool((unprotected & ~protected).any())
+    unpaid_cut = bool(weekday_slice["Durum"].eq("UCRETSIZ_IZIN").any())
+    return absence_cut or unpaid_cut
 
 
 def _context_caused_sunday_cut(
@@ -578,12 +580,10 @@ def prepare_daily(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.Data
 
         sunday_idx = week.index[week["day_of_week"] == 6].tolist()
         source_burned = bool(work.loc[sunday_idx, "Durum"].eq("UCRETSIZ_HAFTA_TATILI").any())
-        # Yalnızca mazeretsiz/devamsızlık keser; rapor, ücretli izin, resmi tatil vb. çalışılmış sayılır.
+        # Mazeretsiz devamsızlık (M) veya ücretsiz izin (Z) pazarı keser;
+        # rapor, ücretli/yıllık izin, resmi tatil vb. çalışılmış sayılır.
         weekday_slice = work.loc[weekday_idx]
-        unprotected = weekday_slice.apply(_devamsizlik_hours, axis=1) >= FULL_DAY_HOURS - 0.01
-        # Korunan durumlar açıkça dışlanır (ileride sınıflama değişirse güvence).
-        protected = weekday_slice["Durum"].isin(SUNDAY_PROTECTING_STATUSES)
-        full_absence = source_burned or bool((unprotected & ~protected).any())
+        full_absence = source_burned or _weekdays_trigger_sunday_cut(weekday_slice)
         work.loc[sunday_idx, "Pazar Durumu"] = "Kesildi" if full_absence else "Hak Edildi"
         if full_absence:
             work.loc[sunday_idx, "Hafta Tatili Kodu"] = "Z"

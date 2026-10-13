@@ -46,7 +46,7 @@ Veri kaynagi ham Meyer satirlari degil; sistemin hesapladigi ozet/haftalik/gunlu
 2. Bu yuzden "ham FM" ile "rapordaki Fazla Mesai" farkli olabilir. Toplam FM sorularinda summary.fazla_mesai kullan.
 3. Izin ayrimi: Yillik / Ucretli / SGK Rapor / Ucretsiz izin ayri tutulur.
 4. Devamsizlik: Hafta ici beklenen sure karsilanmazsa ve izin yoksa M (mazeretsiz).
-5. Pazar kesintisi: Yalnizca mazeretsiz tam gun (~9 saat) devamsizlikta o haftanin pazari kesilir (Z / Kesildi).
+5. Pazar kesintisi: Mazeretsiz tam gun (~9 saat) devamsizlikta (M) VEYA hafta icinde en az bir ucretsiz izinde (Z) o haftanin pazari kesilir (Z / Kesildi).
 6. Rapor, yillik/ucretli mazeret izni, isveren izni ve resmi tatiller calisilmis sayilir; hafta tatili hakki dusmez (T / Hak Edildi).
 7. Cumartesi mesai yoksa A3 (serbest zaman); mesai varsa saat yazilir.
 8. Gunluk matriste calisma gunlerinde kod yerine NM+FM saati (sayisal) gorunebilir.

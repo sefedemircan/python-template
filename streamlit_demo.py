@@ -167,7 +167,7 @@ Hafta içi toplam NM 45 saatin altındaysa, hafta sonu FM saatleri otomatik olar
 Çalışma · Ücretli İzin / Rapor · Ücretsiz İzin · Devamsızlık · Hafta Sonu
 
 **Pazar kesinti kuralı**  
-Yalnızca tek bir iş gününde `9:00` saat **mazeretsiz** devamsızlık varsa o haftada pazar "Yanar" olur.  
+Tek bir iş gününde `9:00` saat **mazeretsiz** devamsızlık (`M`) **veya** en az bir ücretsiz izin (`Z`) varsa o haftada pazar "Yanar" olur.  
 Rapor, yıllık/ücretli mazeret izni ve resmi tatiller çalışılmış sayılır; hafta tatili kesilmez.  
 Parçalı devamsızlık toplamı `9:00` olsa bile pazar kesintisi tetiklenmez.
             """

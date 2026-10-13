@@ -99,6 +99,14 @@ def test_protected_leave_does_not_cut_sunday():
         assert result.monthly.loc[0, "07 Pz"] == "T", column
 
 
+def test_unpaid_leave_cuts_sunday():
+    result = build_report(week_with_leave("UCZIZS"), 2026, 6)
+    assert result.weekly.loc[0, "Pazar Durumu"] == "Kesildi"
+    assert result.monthly.loc[0, "05 Cu"] == "Z"
+    assert result.monthly.loc[0, "06 Ct"] == "A3"
+    assert result.monthly.loc[0, "07 Pz"] == "Z"
+
+
 def test_excel_report_is_created():
     data = create_excel_report(build_report(sample_frame(), 2026, 6))
     assert data.startswith(b"PK")
@@ -234,6 +242,16 @@ def test_context_june_protected_leave_keeps_july_sunday():
     assert result.monthly.loc[0, "04 Ct"] == "A3"
     assert float(result.summary.loc[0, "Normal Çalışma"]) == 27.0
     assert int(result.summary.loc[0, "Yıllık İzin (gün)"]) == 0
+
+
+def test_context_june_unpaid_leave_cuts_july_sunday():
+    frame = july_week_with_june_context(june_absent=False, june_leave_col="UCZIZS")
+    result = build_report(frame, 2026, 7)
+
+    assert result.weekly.loc[0, "Pazar Durumu"] == "Kesildi"
+    assert result.weekly.loc[0, "Pazar Kaynağı"] == "Bağlam"
+    assert result.monthly.loc[0, "05 Pz"] == "Z*"
+    assert float(result.summary.loc[0, "Normal Çalışma"]) == 27.0
 
 
 def test_download_81_june_context_absence_burns_first_july_sunday():

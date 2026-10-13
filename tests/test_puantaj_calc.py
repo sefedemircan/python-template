@@ -79,6 +79,39 @@ def test_context_worked_keeps_sunday_and_excludes_june_nm():
     assert set(daily.loc[daily["Bağlam"] == "Evet", "Gün Durumu"]) == {"Çalışma"}
 
 
+def test_weekday_unpaid_leave_burns_sunday():
+    rows = []
+    for day in range(1, 8):
+        row = {
+            "sicilno": "00020",
+            "Ad": "UCRETSIZ",
+            "Soyad": "TEST",
+            "mesaitarih": pd.Timestamp(2026, 6, day),
+            "NM": time(9) if day <= 4 else time(0),
+            "FM": time(0),
+            "MS": time(9) if day <= 5 else time(0),
+            "EM": time(0),
+            "IZS": time(0),
+            "YIZS": time(0),
+            "SGKIZS": time(0),
+            "UCZIZS": time(7, 30) if day == 5 else time(0),
+            "RM": time(0),
+            "İzin Açıklama": "#__#",
+        }
+        if day == 5:
+            row["NM"] = time(0)
+        rows.append(row)
+
+    _, daily, weekly, _, summary = calculate_puantaj(pd.DataFrame(rows), year=2026, month=6)
+
+    assert summary["ucretsiz_izin_gun"] == 1
+    assert summary["pazar_yanan_hafta"] == 1
+    assert weekly.loc[0, "Pazar Durumu"] == "Yanar"
+    assert weekly.loc[0, "Pazar Kaynağı"] == "Dönem"
+    friday = daily[daily["Gün"] == "Cuma"].iloc[0]
+    assert friday["Gün Durumu"] == "Ücretsiz İzin"
+
+
 def test_explicit_period_overrides_majority_month():
     # Daha çok Haziran günü olsa bile year/month ile Temmuz seçilir
     rows = []

@@ -84,7 +84,7 @@ Bunları frontend’de yeniden hesaplamanız gerekmez; backend uygular. Kullanı
 1. **45 saat kuralı** — Hafta içi NM 45’in altındaysa, aynı haftanın hafta sonu FM’sinden eksik kısım NM’ye aktarılır.
 2. **İzin ayrımı** — Ücretli izin / yıllık / SGK raporu / ücretsiz izin sütun ve açıklamalardan ayrılır.
 3. **Devamsızlık** — Hafta içi beklenen süre (varsayılan 9 saat veya `MS`) karşılanmazsa ve izin yoksa (`M`).
-4. **Pazar kesintisi** — Yalnızca mazeretsiz tam gün (~9 saat) devamsızlıkta o haftanın pazarı kesilir (`Z`). Rapor, yıllık/ücretli mazeret izni, işveren izni ve resmi tatiller **çalışılmış sayılır**; hafta tatili hakkı düşmez (`T`).
+4. **Pazar kesintisi** — Mazeretsiz tam gün (~9 saat) devamsızlıkta (`M`) **veya** hafta içinde en az bir ücretsiz izinde (`Z`) o haftanın pazarı kesilir (`Z`). Rapor, yıllık/ücretli mazeret izni, işveren izni ve resmi tatiller **çalışılmış sayılır**; hafta tatili hakkı düşmez (`T`).
 5. **Cumartesi** — Mesai (NM/FM) yoksa `A3` (serbest zaman); mesai varsa saat yazılır.
 6. **Hafta sayısı** — Takvim ayına sabit değildir; dosyadaki tarihlerin düştüğü ISO haftaları sayılır.
 

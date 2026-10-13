@@ -370,29 +370,22 @@ def calculate_puantaj(df, year: int | None = None, month: int | None = None):
                     df_calc.loc[idx, "NM_h"] += deduct
                     missing_nm -= deduct
 
-        pazar_kesinti_tetik = bool(
-            (
-                df_calc.loc[weekday_mask, "devamsizlik_h"]
-                >= SUNDAY_CUT_ABSENCE_HOURS
-            ).any()
-        )
+        def _weekday_cuts_sunday(mask: pd.Series) -> bool:
+            slice_df = df_calc.loc[mask]
+            if slice_df.empty:
+                return False
+            absence_cut = (slice_df["devamsizlik_h"] >= SUNDAY_CUT_ABSENCE_HOURS).any()
+            unpaid_cut = (slice_df["gun_durumu"] == "Ücretsiz İzin").any()
+            return bool(absence_cut or unpaid_cut)
+
+        pazar_kesinti_tetik = _weekday_cuts_sunday(weekday_mask)
 
         # Haftalık özet: yalnızca birincil dönemle kesişen haftalar
         if not bool((week_mask & ~df_calc["is_context"]).any()):
             continue
 
-        period_weekday_cut = bool(
-            (
-                df_calc.loc[weekday_mask & ~df_calc["is_context"], "devamsizlik_h"]
-                >= SUNDAY_CUT_ABSENCE_HOURS
-            ).any()
-        )
-        context_weekday_cut = bool(
-            (
-                df_calc.loc[weekday_mask & df_calc["is_context"], "devamsizlik_h"]
-                >= SUNDAY_CUT_ABSENCE_HOURS
-            ).any()
-        )
+        period_weekday_cut = _weekday_cuts_sunday(weekday_mask & ~df_calc["is_context"])
+        context_weekday_cut = _weekday_cuts_sunday(weekday_mask & df_calc["is_context"])
         pazar_kaynak = ""
         if pazar_kesinti_tetik:
             pazar_kaynak = (
