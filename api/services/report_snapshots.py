@@ -7,7 +7,7 @@ from typing import Any
 
 from api.deps import dataframe_to_records
 from api.services.supabase import SupabaseClient, SupabaseError
-from puantaj_report import ReportResult, format_hours
+from puantaj_report import WEEKLY_HOUR_COLUMNS, ReportResult, format_hours
 
 # PostgREST requires all objects in a batch insert to share the same keys.
 _ROW_KEYS = (
@@ -300,10 +300,7 @@ def load_report_response_from_snapshot(upload_id: str, year: int, month: int) ->
         result.summary,
         ["Normal Çalışma", "Fazla Mesai", "FM→NM Aktarım"],
     )
-    weekly = format_hour_columns(
-        result.weekly,
-        ["Hafta İçi NM", "Hafta Sonu Ham FM", "FM→NM Aktarım", "Toplam NM", "Kalan FM"],
-    )
+    weekly = format_hour_columns(result.weekly, list(WEEKLY_HOUR_COLUMNS))
     daily = result.daily.copy()
     hour_cols = [c for c in daily.columns if str(c).endswith("_h")]
     daily = format_hour_columns(daily, hour_cols)

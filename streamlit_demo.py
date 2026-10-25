@@ -324,8 +324,10 @@ def render_report_page():
                 "FM→NM Aktarım",
                 "Toplam NM",
                 "Kalan FM",
+                "Önceki Ay Devir",
             ):
-                display_weekly[column] = display_weekly[column].map(format_hours)
+                if column in display_weekly.columns:
+                    display_weekly[column] = display_weekly[column].map(format_hours)
             st.dataframe(display_weekly, width="stretch", hide_index=True, height=520)
         with tab_detail:
             st.dataframe(detail, width="stretch", hide_index=True, height=520)

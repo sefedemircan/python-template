@@ -29,6 +29,7 @@ from api.services.supabase import SupabaseError
 from api.services.uploads import get_upload, load_upload_dataframe
 from otom_template_fill import fill_otom_template
 from puantaj_report import (
+    WEEKLY_HOUR_COLUMNS,
     ReportResult,
     available_periods,
     build_report,
@@ -86,10 +87,7 @@ def _build_response_payload(result: ReportResult, year: int, month: int) -> Repo
         result.summary,
         ["Normal Çalışma", "Fazla Mesai", "FM→NM Aktarım"],
     )
-    weekly = format_hour_columns(
-        result.weekly,
-        ["Hafta İçi NM", "Hafta Sonu Ham FM", "FM→NM Aktarım", "Toplam NM", "Kalan FM"],
-    )
+    weekly = format_hour_columns(result.weekly, list(WEEKLY_HOUR_COLUMNS))
     daily = result.daily.copy()
     hour_cols = [c for c in daily.columns if str(c).endswith("_h")]
     daily = format_hour_columns(daily, hour_cols)

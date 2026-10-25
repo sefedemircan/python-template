@@ -451,10 +451,10 @@ export async function buildReport(
 
 | Tab | Alan |
 |-----|------|
-| Aylık Puantaj | `monthly` — gün kolonları örn. `"01 Pt"`, kod veya saat |
+| Aylık Puantaj | `monthly` — kimlik, varsa artık hafta kolonları, sonra gün kolonları örn. `"01 Pt"` |
 | Personel Özeti | `summary` — UI’da `*_fmt` göster |
-| Haftalık Kontrol | `weekly` |
-| Günlük Detay | `daily` |
+| Haftalık Kontrol | `weekly` — `Tür`, `Önceki Ay Devir`, `Devir Aralığı` |
+| Günlük Detay | `daily` — yalnızca seçilen ay; önceki ay günleri burada yok |
 | Veri kalitesi | `quality` |
 
 Personel arama (client-side): `Personel` veya `Sicil No` üzerinde filter; `monthly` filtreleyip `Sicil No` set’i ile `summary` / `weekly` / `daily` daraltın.
@@ -493,6 +493,64 @@ export async function downloadReportExcel(
 ```
 
 `Content-Type`: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+
+Excel, `build` ile aynı `monthly` / `weekly` alanlarını sayfalara yazar. Artık hafta kolonları hem JSON’da hem **Aylık Puantaj** / **Haftalık Kontrol** sayfalarında vardır. Ayrıntı bir sonraki bölümde.
+
+---
+
+### Artık hafta (önceki aydan gelen ilk hafta)
+
+Ay **pazartesi** başlıyorsa artık hafta yoktur: `Artık Hafta` boştur, `Önceki Ay Devir` `0`dır, `dd.mm` gün kolonları gelmez, tüm `weekly.Tür` değerleri `"Tam"`dır.
+
+Ay başka bir günde başlıyorsa ilk ISO hafta önceki ayda başlar. Örnek: 1 Temmuz 2026 çarşambadır; hafta `2026-H27` = 29–30 Haziran + 1–5 Temmuz.
+
+Bu günler **aylık toplama ve Günlük Detay’a girmez**. Yalnızca ilk haftayı tamamlamak ve devir saatini göstermek için matrise eklenir. Kaynak dosyada önceki ay satırı yoksa kolonlar yine gelir, hücreler boş kalır, devir `0` olur.
+
+#### `monthly` alanları
+
+Kimlik kolonlarından hemen sonra, ayın `01 …` günlerinden önce:
+
+| Kolon | Tip | Anlam |
+|-------|-----|--------|
+| `Artık Hafta` | string | İlk ISO hafta, örn. `"2026-H27"`. Pazartesi başlangıçta `""`. |
+| `Önceki Ay Devir` | number | Bu personelin önceki ay günlerindeki fiili `NM + FM` saati. |
+| `dd.mm Gd` | number \| string \| null | Önceki ay gün hücresi. Örnek: `"29.06 Pt"`, `"30.06 Sa"`. Çalışılan günde saat, diğerinde kod (`M`, `Y`, `Z`, …). Kayıt yoksa `null`. |
+
+Gün kodları seçilen ayın günleriyle aynıdır (`"01 Pt"` biçimi). Artık günler `dd.mm Gd` biçimindedir; ayın 29’u ile karışmaz.
+
+`Önceki Ay Devir` personel özetindeki `Normal Çalışma`ya eklenmez. İzin, rapor ve devamsızlık kodlarının puantaj karşılığı devre yazılmaz; yalnızca fiili çalışma saati yazılır.
+
+#### `weekly` alanları
+
+İlgili ISO hafta satırında:
+
+| Kolon | Tip | Anlam |
+|-------|-----|--------|
+| `Tür` | `"Artık"` \| `"Tam"` | Hafta dönem başlamadan önce başlıyorsa `"Artık"`. |
+| `Devir Aralığı` | string | `"29.06.2026 – 30.06.2026"`. Tam haftada `""`. |
+| `Önceki Ay Devir` | number | Artık satırda fiili devir saati; tam haftada `0`. |
+| `Önceki Ay Devir_fmt` | string | `"18:00"` gibi. Diğer saat kolonları gibi UI’da bunu gösterin. |
+
+`Hafta İçi NM` / `Toplam NM` artık günlerdeki fiili saati de içerir; 45 saat aktarımı bu tam hafta üzerinden yapılır. Personel özeti ise yalnızca seçilen ayı toplar. İkisini aynı sayı gibi göstermeyin.
+
+Bağlam günündeki devamsızlık veya ücretsiz izin pazarı keserse `Pazar Kaynağı` `"Bağlam"` olur. Aylık matriste o pazar `Z*` gelir. Excel hücresine `Z` yazılır ve turuncu boyanır. Aylık toplamda bu gün yine seçilen aya aittir; devir saatine eklenmez.
+
+#### Ekranda yerleştirme
+
+1. `monthly` kolon sırasını bozmayın: kimlik → `Artık Hafta` → `Önceki Ay Devir` → `dd.mm` günleri → `01 …` günleri.
+2. `dd.mm` başlıklarını ve `Artık Hafta` / `Önceki Ay Devir` başlıklarını dönem günlerinden ayrı renkle gösterin (Excel’de turuncu).
+3. `weekly` satırında `Tür === "Artık"` ise satırı vurgulayın; `Devir Aralığı` ve `Önceki Ay Devir_fmt` görünsün.
+4. Günlük detay sekmesine bu günleri eklemeyin. `meta.record_count` yalnızca dönem kayıtlarıdır.
+5. Ay ortası işe girişte devri sıfırlama hesap Excel’inde yoktur; o kural yalnızca OTOM şablon doldurmada, şablondaki giriş tarihine bakılarak uygulanır.
+
+#### Excel sayfaları
+
+| Sayfa | Ne değişir |
+|-------|------------|
+| Aylık Puantaj | Turuncu `Artık Hafta`, `Önceki Ay Devir`, `29.06 Pt` … kolonları gün 1’den önce |
+| Haftalık Kontrol | `Tür`, `Devir Aralığı`, `Önceki Ay Devir` (`HH:MM`). Artık satırın zemini turuncu |
+| Rapor Bilgisi | `Artık hafta` notu |
+| Günlük Detay / Personel Özeti | Değişmez; önceki ay günleri ve devir saati eklenmez |
 
 ---
 
@@ -558,7 +616,9 @@ Frontend’in hesaplaması gerekmez; kullanıcıya açıklama göstermek için:
 
 **Pazar kesinti (report):** Özet/haftalıkta **Kesildi** / **Hak Edildi**; matriste `Z` kodu.
 
-**ISO hafta:** Takvim ayına sabit değildir; kısmi haftalar normaldir.
+**ISO hafta:** Takvim ayına sabit değildir. Ay pazartesi dışında başlıyorsa ilk hafta önceki aydan gelen **artık haftadır**.
+
+**Artık hafta:** Önceki ayın o haftaya düşen günleri matriste `dd.mm Gd` kolonudur. `Önceki Ay Devir` yalnız fiili `NM+FM` saatidir. İzin kodu ve aylık `Normal Çalışma` devre eklenmez. Ayrıntı: [Artık hafta](#artık-hafta-önceki-aydan-gelen-ilk-hafta).
 
 ---
 
@@ -592,7 +652,8 @@ Frontend’de: `NEXT_PUBLIC_API_URL=https://your-api.vercel.app`
 - [ ] Toplu dosya → `inspect.employees.length > 1` → `compute` + `sicilno`
 - [ ] `compute` JSON rows ile NM değiştir → özet değişir
 - [ ] `report/periods` → `build` → dört tablo
-- [ ] `report/excel` → `.xlsx` iner
+- [ ] Pazartesi başlamayan ayda `monthly["Artık Hafta"]` ve `weekly.Tür === "Artık"` dolu; `Önceki Ay Devir` aylık `Normal Çalışma`ya eklenmiyor
+- [ ] `report/excel` → `.xlsx` iner; Aylık Puantaj’da artık kolonlar gün 1’den önce
 - [ ] Bilerek bozuk dosya → `detail.code` dolu 400
 
 ---

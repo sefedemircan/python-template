@@ -61,6 +61,7 @@ Frontend’de Streamlit demosundaki gibi **iki ayrı sayfa / route** düşünül
 **Matris hücreleri:**
 - Çalışılan günde: o günün çalışma saati (NM + FM özeti)
 - Diğer günlerde: durum kodu (`T`, `Z`, `Y`, `Ü`, `R`, `M`, `A3`, …) — efsane API `meta` ve rapor ekranında vardır
+- Ay pazartesi dışında başlıyorsa, gün 1’den önce **artık hafta** kolonları vardır (`Artık Hafta`, `Önceki Ay Devir`, `29.06 Pt` gibi). Bu saatler aylık toplama eklenmez. Sözleşme: [`FRONTEND_API.md`](./FRONTEND_API.md) içindeki Artık hafta bölümü.
 
 ---
 

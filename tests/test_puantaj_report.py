@@ -32,7 +32,7 @@ def sample_frame():
 
 
 def week_with_leave(leave_column: str, leave_code: str | None = None):
-    """Hafta içi bir gün izinli; cumartesi mesaisiz."""
+    """Hafta içi bir gün izinli; cumartesi mesaisiz"""
     rows = []
     for day in range(1, 8):
         row = {
@@ -122,7 +122,7 @@ def test_excel_report_handles_reordered_snapshot_columns():
     workbook = load_workbook(BytesIO(data))
     headers = [cell.value for cell in workbook["Aylık Puantaj"][1]]
 
-    assert headers[:8] == [
+    assert headers[:10] == [
         "Sicil No",
         "Personel",
         "Firma",
@@ -130,6 +130,8 @@ def test_excel_report_handles_reordered_snapshot_columns():
         "Pozisyon",
         "Görev",
         "Yaka",
+        "Artık Hafta",
+        "Önceki Ay Devir",
         "01 Pt",
     ]
 
@@ -265,3 +267,56 @@ def test_download_81_june_context_absence_burns_first_july_sunday():
     assert first_week["Pazar Durumu"] == "Kesildi"
     assert first_week["Pazar Kaynağı"] == "Bağlam"
     assert result.daily["Tarih"].dt.month.eq(7).all()
+
+
+def test_monday_month_has_no_carry_week():
+    result = build_report(sample_frame(), 2026, 6)
+    assert result.monthly.loc[0, "Artık Hafta"] == ""
+    assert float(result.monthly.loc[0, "Önceki Ay Devir"]) == 0
+    assert "29.06 Pt" not in result.monthly.columns
+    assert set(result.weekly["Tür"]) == {"Tam"}
+    assert float(result.weekly["Önceki Ay Devir"].sum()) == 0
+
+
+def test_previous_month_work_is_carry_not_monthly_total():
+    result = build_report(july_week_with_june_context(june_absent=False), 2026, 7)
+
+    assert result.monthly.loc[0, "Artık Hafta"] == "2026-H27"
+    assert result.monthly.loc[0, "29.06 Pt"] == 9
+    assert result.monthly.loc[0, "30.06 Sa"] == 9
+    assert float(result.monthly.loc[0, "Önceki Ay Devir"]) == 18
+    assert float(result.summary.loc[0, "Normal Çalışma"]) == 27
+    week = result.weekly.loc[0]
+    assert week["Tür"] == "Artık"
+    assert week["Devir Aralığı"] == "29.06.2026 – 30.06.2026"
+    assert float(week["Önceki Ay Devir"]) == 18
+    assert result.daily["Tarih"].dt.month.eq(7).all()
+
+
+def test_previous_month_leave_and_absence_do_not_carry_hours():
+    absent = build_report(july_week_with_june_context(june_absent=True), 2026, 7)
+    assert absent.monthly.loc[0, "29.06 Pt"] == "M"
+    assert float(absent.weekly.loc[0, "Önceki Ay Devir"]) == 0
+    assert absent.weekly.loc[0, "Tür"] == "Artık"
+
+    leave = build_report(july_week_with_june_context(june_absent=False, june_leave_col="YIZS"), 2026, 7)
+    assert leave.monthly.loc[0, "29.06 Pt"] == "Y"
+    assert float(leave.weekly.loc[0, "Önceki Ay Devir"]) == 0
+
+
+def test_excel_report_shows_carry_week_columns():
+    result = build_report(july_week_with_june_context(june_absent=False), 2026, 7)
+    workbook = load_workbook(BytesIO(create_excel_report(result)))
+    headers = [cell.value for cell in workbook["Aylık Puantaj"][1]]
+
+    assert headers[7:12] == ["Artık Hafta", "Önceki Ay Devir", "29.06 Pt", "30.06 Sa", "01 Ça"]
+    assert workbook["Aylık Puantaj"].cell(2, 9).value == 18
+    assert workbook["Aylık Puantaj"].cell(2, 10).value == 9
+    assert workbook["Aylık Puantaj"].cell(2, 11).value == 9
+    weekly_headers = [cell.value for cell in workbook["Haftalık Kontrol"][1]]
+    kind_col = weekly_headers.index("Tür") + 1
+    carry_col = weekly_headers.index("Önceki Ay Devir") + 1
+    assert workbook["Haftalık Kontrol"].cell(2, kind_col).value == "Artık"
+    assert workbook["Haftalık Kontrol"].cell(2, carry_col).value == "18:00"
+    notes = [workbook["Rapor Bilgisi"].cell(row, 1).value for row in range(1, 12)]
+    assert "Artık hafta" in notes

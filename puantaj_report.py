@@ -19,6 +19,19 @@ from openpyxl.utils import get_column_letter
 
 WEEKLY_MAX_HOURS = 45.0
 FULL_DAY_HOURS = 9.0
+SHORT_DAY_NAMES = ("Pt", "Sa", "Ça", "Pe", "Cu", "Ct", "Pz")
+LONG_DAY_NAMES = ("Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar")
+DAY_COLUMN_PATTERN = re.compile(r"^(0[1-9]|[12]\d|3[01]) (Pt|Sa|Ça|Pe|Cu|Ct|Pz)$")
+CONTEXT_COLUMN_PATTERN = re.compile(r"^(\d{2})\.(\d{2}) (Pt|Sa|Ça|Pe|Cu|Ct|Pz)$")
+CARRY_COLUMNS = ("Artık Hafta", "Önceki Ay Devir")
+WEEKLY_HOUR_COLUMNS = (
+    "Hafta İçi NM",
+    "Hafta Sonu Ham FM",
+    "FM→NM Aktarım",
+    "Toplam NM",
+    "Kalan FM",
+    "Önceki Ay Devir",
+)
 
 # Yasal mazeret / izin / resmi tatil: çalışılmış sayılır, hafta tatili kesilmez.
 SUNDAY_PROTECTING_STATUSES = frozenset({
@@ -640,6 +653,143 @@ def _period_mask(daily: pd.DataFrame, year: int, month: int) -> pd.Series:
     return period_mask(daily["Tarih"], year, month)
 
 
+def previous_month_context_dates(period_start: pd.Timestamp) -> list[pd.Timestamp]:
+    """Ay pazartesi başlamıyorsa, ilk ISO haftanın önceki aya ait günleri."""
+    period_start = pd.Timestamp(period_start).normalize()
+    offset = int(period_start.dayofweek)
+    if offset == 0:
+        return []
+    start = period_start - pd.Timedelta(days=offset)
+    return [start + pd.Timedelta(days=index) for index in range(offset)]
+
+
+def context_column_name(day: pd.Timestamp) -> str:
+    day = pd.Timestamp(day)
+    return f"{int(day.day):02d}.{int(day.month):02d} {SHORT_DAY_NAMES[int(day.dayofweek)]}"
+
+
+def _context_sort_key(column: str, period_start: pd.Timestamp) -> pd.Timestamp:
+    match = CONTEXT_COLUMN_PATTERN.fullmatch(str(column))
+    if match is None:
+        return pd.Timestamp.max
+    day = int(match.group(1))
+    month = int(match.group(2))
+    year = int(period_start.year)
+    if month > int(period_start.month):
+        year -= 1
+    return pd.Timestamp(year=year, month=month, day=day)
+
+
+def _iso_week_start(label: object) -> pd.Timestamp:
+    year_text, week_text = str(label).split("-H")
+    return pd.Timestamp.fromisocalendar(int(year_text), int(week_text), 1)
+
+
+def _carry_hours_by_sicil(daily_all: pd.DataFrame, context_days: list[pd.Timestamp]) -> dict[object, float]:
+    """Önceki ay günlerindeki fiili NM+FM. İzin kodları eklenmez."""
+    if not context_days or daily_all.empty:
+        return {}
+    dates = daily_all["Tarih"].dt.normalize()
+    window = daily_all.loc[dates.isin(context_days)]
+    if window.empty:
+        return {}
+    hours = window["NM_h"].fillna(0) + window["FM_h"].fillna(0)
+    totals = hours.groupby(window["sicilno"]).sum()
+    return {sicil: round(float(value), 2) for sicil, value in totals.items()}
+
+
+def _annotate_previous_month_week(
+    monthly: pd.DataFrame,
+    weekly: pd.DataFrame,
+    daily_all: pd.DataFrame,
+    quality: pd.DataFrame,
+    period_start: pd.Timestamp,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    period_start = pd.Timestamp(period_start).normalize()
+    context_days = previous_month_context_dates(period_start)
+    carries = _carry_hours_by_sicil(daily_all, context_days)
+    week_label = ""
+    devir_range = ""
+    if context_days:
+        iso = context_days[0].isocalendar()
+        week_label = f"{int(iso.year)}-H{int(iso.week):02d}"
+        devir_range = f"{context_days[0]:%d.%m.%Y} – {context_days[-1]:%d.%m.%Y}"
+
+    monthly = monthly.copy()
+    monthly["Artık Hafta"] = week_label
+    monthly["Önceki Ay Devir"] = monthly["Sicil No"].map(lambda sicil: carries.get(sicil, 0.0))
+    dates = daily_all["Tarih"].dt.normalize()
+    for day in context_days:
+        coded = (
+            daily_all.loc[dates.eq(day), ["sicilno", "Kod"]]
+            .drop_duplicates("sicilno")
+            .set_index("sicilno")["Kod"]
+        )
+        monthly[context_column_name(day)] = monthly["Sicil No"].map(coded)
+
+    identity_columns = ["Sicil No", "Personel", "Firma", "Bölüm", "Pozisyon", "Görev", "Yaka"]
+    context_columns = sorted(
+        (column for column in monthly.columns if CONTEXT_COLUMN_PATTERN.fullmatch(str(column))),
+        key=lambda column: _context_sort_key(str(column), period_start),
+    )
+    day_columns = [column for column in monthly.columns if DAY_COLUMN_PATTERN.fullmatch(str(column))]
+    used = {*identity_columns, *CARRY_COLUMNS, *context_columns, *day_columns}
+    monthly = monthly.reindex(
+        columns=[
+            *(column for column in identity_columns if column in monthly.columns),
+            *(column for column in CARRY_COLUMNS if column in monthly.columns),
+            *context_columns,
+            *day_columns,
+            *(column for column in monthly.columns if column not in used),
+        ]
+    )
+
+    weekly = weekly.copy()
+    if weekly.empty:
+        weekly["Tür"] = pd.Series(dtype=str)
+        weekly["Devir Aralığı"] = pd.Series(dtype=str)
+        weekly["Önceki Ay Devir"] = pd.Series(dtype=float)
+    else:
+        week_starts = weekly["Hafta"].map(_iso_week_start)
+        weekly["Tür"] = ["Artık" if start < period_start else "Tam" for start in week_starts]
+        weekly["Devir Aralığı"] = [devir_range if kind == "Artık" else "" for kind in weekly["Tür"]]
+        weekly["Önceki Ay Devir"] = [
+            carries.get(sicil, 0.0) if kind == "Artık" else 0.0
+            for sicil, kind in zip(weekly["Sicil No"], weekly["Tür"], strict=True)
+        ]
+    preferred = [
+        "Sicil No",
+        "Personel",
+        "Bölüm",
+        "Hafta",
+        "Hafta Aralığı",
+        "Tür",
+        "Devir Aralığı",
+        "Önceki Ay Devir",
+        *WEEKLY_HOUR_COLUMNS[:5],
+        "Pazar Durumu",
+        "Pazar Kaynağı",
+    ]
+    weekly = weekly.reindex(
+        columns=[*(column for column in preferred if column in weekly.columns), *(column for column in weekly.columns if column not in preferred)]
+    )
+
+    if context_days:
+        weekday = LONG_DAY_NAMES[int(period_start.dayofweek)]
+        note = pd.DataFrame([{
+            "Seviye": "Bilgi",
+            "Kontrol": "Artık hafta",
+            "Kayıt": len(context_days),
+            "Açıklama": (
+                f"Dönem {period_start:%d.%m.%Y} {weekday} başlıyor. "
+                f"İlk ISO haftanın önceki aya ait günleri ({devir_range}) aylık matrise eklendi. "
+                "Önceki Ay Devir yalnızca bu günlerdeki fiili NM+FM saatidir; izin kodları ve aylık toplamlar devre eklenmez."
+            ),
+        }])
+        quality = pd.concat([quality, note], ignore_index=True)
+    return monthly, weekly, quality
+
+
 def build_report(df: pd.DataFrame, year: int | None = None, month: int | None = None) -> ReportResult:
     daily_all, weekly_all, quality = prepare_daily(df)
     if daily_all.empty:
@@ -741,6 +891,13 @@ def build_report(df: pd.DataFrame, year: int | None = None, month: int | None = 
         "Durum Açıklaması", "Kaynak Kod", "Kod", "Pazar Durumu",
     ]
     detail = daily[detail_columns].rename(columns={"sicilno": "Sicil No"}).reset_index(drop=True)
+    monthly, weekly, quality = _annotate_previous_month_week(
+        monthly,
+        weekly,
+        daily_all,
+        quality,
+        period_start,
+    )
     return ReportResult(detail, monthly, summary, weekly.reset_index(drop=True), quality, period_start, period_end)
 
 
@@ -783,19 +940,22 @@ def create_excel_report(result: ReportResult) -> bytes:
     wb.remove(wb.active)
 
     identity_columns = ["Sicil No", "Personel", "Firma", "Bölüm", "Pozisyon", "Görev", "Yaka"]
-    day_column_pattern = re.compile(r"^(0[1-9]|[12]\d|3[01]) (Pt|Sa|Ça|Pe|Cu|Ct|Pz)$")
     day_columns = sorted(
-        (column for column in result.monthly.columns if day_column_pattern.fullmatch(str(column))),
+        (column for column in result.monthly.columns if DAY_COLUMN_PATTERN.fullmatch(str(column))),
         key=lambda column: int(str(column)[:2]),
     )
-    other_columns = [
-        column
-        for column in result.monthly.columns
-        if column not in identity_columns and column not in day_columns
-    ]
+    context_columns = sorted(
+        (column for column in result.monthly.columns if CONTEXT_COLUMN_PATTERN.fullmatch(str(column))),
+        key=lambda column: _context_sort_key(str(column), result.period_start),
+    )
+    carry_columns = [column for column in CARRY_COLUMNS if column in result.monthly.columns]
+    placed = {*identity_columns, *day_columns, *context_columns, *carry_columns}
+    other_columns = [column for column in result.monthly.columns if column not in placed]
     monthly = result.monthly.reindex(
         columns=[
             *(column for column in identity_columns if column in result.monthly.columns),
+            *carry_columns,
+            *context_columns,
             *day_columns,
             *other_columns,
         ]
@@ -803,16 +963,24 @@ def create_excel_report(result: ReportResult) -> bytes:
 
     monthly_ws = wb.create_sheet()
     _write_dataframe(monthly_ws, monthly, "Aylık Puantaj", "H2")
-    day_column_indexes = [
-        cell.column for cell in monthly_ws[1] if day_column_pattern.fullmatch(str(cell.value))
-    ]
-    for column_index in day_column_indexes:
-        cell = monthly_ws.cell(1, column_index)
-        day_number = int(str(cell.value)[:2])
-        if pd.Timestamp(result.period_start.year, result.period_start.month, day_number).dayofweek >= 5:
-            cell.fill = PatternFill("solid", fgColor="8A5A00")
+    context_fill = PatternFill("solid", fgColor="C65911")
+    weekend_fill = PatternFill("solid", fgColor="8A5A00")
+    day_column_indexes = []
+    context_column_indexes = []
+    for cell in monthly_ws[1]:
+        header = str(cell.value)
+        if DAY_COLUMN_PATTERN.fullmatch(header):
+            day_column_indexes.append(cell.column)
+            day_number = int(header[:2])
+            if pd.Timestamp(result.period_start.year, result.period_start.month, day_number).dayofweek >= 5:
+                cell.fill = weekend_fill
+        elif CONTEXT_COLUMN_PATTERN.fullmatch(header):
+            context_column_indexes.append(cell.column)
+            cell.fill = context_fill
+        elif header in CARRY_COLUMNS:
+            cell.fill = context_fill
     for row_index in range(2, monthly_ws.max_row + 1):
-        for column_index in day_column_indexes:
+        for column_index in (*context_column_indexes, *day_column_indexes):
             cell = monthly_ws.cell(row_index, column_index)
             cell.alignment = Alignment(horizontal="center")
             raw = cell.value
@@ -828,8 +996,9 @@ def create_excel_report(result: ReportResult) -> bytes:
     hour_columns = ["Normal Çalışma", "Fazla Mesai", "FM→NM Aktarım"]
     for column in hour_columns:
         summary[column] = summary[column].map(format_hours)
-    for column in ["Hafta İçi NM", "Hafta Sonu Ham FM", "FM→NM Aktarım", "Toplam NM", "Kalan FM"]:
-        weekly[column] = weekly[column].map(format_hours)
+    for column in WEEKLY_HOUR_COLUMNS:
+        if column in weekly.columns:
+            weekly[column] = weekly[column].map(format_hours)
     for column in [c for c in detail.columns if c.endswith("_h")]:
         detail[column] = detail[column].map(format_hours)
     detail["Tarih"] = pd.to_datetime(detail["Tarih"], format="mixed", dayfirst=True)
@@ -844,6 +1013,17 @@ def create_excel_report(result: ReportResult) -> bytes:
         ws = wb.create_sheet()
         _write_dataframe(ws, frame, name, freeze)
 
+    weekly_ws = wb["Haftalık Kontrol"]
+    header_columns = {cell.value: cell.column for cell in weekly_ws[1]}
+    kind_column = header_columns.get("Tür")
+    if kind_column is not None:
+        carry_row_fill = PatternFill("solid", fgColor="FCE5CD")
+        for row_index in range(2, weekly_ws.max_row + 1):
+            if weekly_ws.cell(row_index, kind_column).value != "Artık":
+                continue
+            for column_index in range(1, weekly_ws.max_column + 1):
+                weekly_ws.cell(row_index, column_index).fill = carry_row_fill
+
     meta = wb.create_sheet("Rapor Bilgisi", 0)
     meta.append(["AYLIK PUANTAJ RAPORU"])
     meta.append(["Dönem", f"{result.period_start:%m.%Y}"])
@@ -852,6 +1032,11 @@ def create_excel_report(result: ReportResult) -> bytes:
     meta.append(["Üretim zamanı", datetime.now().strftime("%d.%m.%Y %H:%M")])
     meta.append([])
     meta.append(["Not", "Çalışma hücreleri NM+FM toplamını; özet sayfası haftalık 45 saat aktarımı sonrasını gösterir."])
+    meta.append([
+        "Artık hafta",
+        "Ay pazartesi dışında başlıyorsa ilk ISO haftanın önceki aya ait günleri turuncu kolonlarda gösterilir. "
+        "Önceki Ay Devir yalnızca bu günlerdeki fiili NM+FM saatidir. İzin kodları ve personel aylık toplamları devre eklenmez.",
+    ])
     meta["A1"].font = Font(size=16, bold=True, color="FFFFFF")
     meta["A1"].fill = PatternFill("solid", fgColor="16324F")
     meta.column_dimensions["A"].width = 22
